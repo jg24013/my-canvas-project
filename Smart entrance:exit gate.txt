@@ -1,0 +1,1027 @@
+```html
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>スマート入退室管理システム (モノトーンQRカード・PC受付版)</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- QRCode.js (高精度QRコード生成用ライブラリ) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <!-- Html5-Qrcode (カメラスキャン用) -->
+  <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <!-- html2canvas (入室証を画像としてダウンロードするため) -->
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <style>
+    /* iOSでの入力フォーム拡大防止とスムーズなタッチスクロール */
+    input, select, button {
+      font-size: 16px !important; 
+    }
+    #reader video {
+      object-fit: cover !important;
+      border-radius: 1rem;
+    }
+    /* クレジットカード規格（比率 1 : 1.586）を維持するためのコンテナ */
+    .credit-card-ratio {
+      aspect-ratio: 1.5857 / 1;
+      width: 100%;
+      max-width: 380px;
+    }
+  </style>
+</head>
+<body class="bg-stone-100 text-stone-900 min-h-screen flex flex-col font-sans select-none pb-8">
+
+  <!-- ヘッダー (シックなダークモノトーン) -->
+  <header class="bg-neutral-900 text-white shadow-md sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
+      <div class="flex items-center space-x-2">
+        <div class="bg-white text-neutral-900 p-1.5 rounded-lg font-bold text-lg shadow-inner">
+          <i class="fa-solid fa-qrcode"></i>
+        </div>
+        <div>
+          <h1 class="text-base font-bold tracking-tight">スマート入退室ゲート</h1>
+          <p class="text-[9px] text-neutral-400 tracking-wider">HIGH-RESPONSE QR CODE SYSTEM</p>
+        </div>
+      </div>
+      <div class="text-xs bg-neutral-800 px-3 py-1.5 rounded-full border border-neutral-700 font-mono flex items-center space-x-2">
+        <span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+        <span id="header-clock">--:--:--</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- メインコンテンツ -->
+  <main class="flex-grow max-w-7xl w-full mx-auto p-4 md:p-6 flex flex-col justify-start">
+    
+    <!-- モード選択タブ（白黒・ミニマル） -->
+    <div class="flex bg-stone-200 p-1 rounded-2xl mb-6 max-w-md mx-auto shadow-inner w-full">
+      <button id="tab-student" onclick="switchMode('student')" class="flex-1 py-3 text-center rounded-xl font-bold text-sm transition-all duration-200 bg-white text-neutral-900 shadow">
+        <i class="fa-solid fa-id-card-clip mr-1 text-base"></i>生徒用 (入室証)
+      </button>
+      <button id="tab-admin" onclick="switchMode('admin')" class="flex-1 py-3 text-center rounded-xl font-bold text-sm transition-all duration-200 text-stone-600 hover:text-stone-900">
+        <i class="fa-solid fa-desktop mr-1 text-base"></i>受付・管理用 (PC画面)
+      </button>
+    </div>
+
+    <!-- ================== 1. 学生用画面 (デジタル入室証 / クレジットカード型) ================== -->
+    <section id="view-student" class="block space-y-4 max-w-md mx-auto w-full">
+      <!-- 検索・選択パネル -->
+      <div class="bg-white p-5 rounded-2xl shadow-sm border border-stone-200">
+        <h2 class="text-xs font-bold text-stone-500 mb-3 uppercase tracking-wider flex items-center">
+          <i class="fa-solid fa-user-check mr-1.5 text-stone-800"></i>生徒を選択してください
+        </h2>
+        
+        <!-- 検索インプット -->
+        <div class="relative">
+          <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-stone-400 pointer-events-none">
+            <i class="fa-solid fa-magnifying-glass"></i>
+          </span>
+          <input type="text" id="student-search-input" oninput="filterStudentSuggestions(this.value)" placeholder="学籍番号、氏名、クラスで検索..." 
+            class="w-full pl-9 pr-4 py-2.5 bg-stone-50 border border-stone-300 rounded-xl focus:ring-1 focus:ring-neutral-900 focus:border-neutral-900 outline-none transition text-sm">
+          
+          <!-- 候補サジェストリスト -->
+          <div id="student-suggestions" class="mt-1 bg-white border border-stone-200 rounded-xl max-h-56 overflow-y-auto hidden shadow-xl absolute z-50 w-full left-0">
+            <!-- 動的に追加 -->
+          </div>
+        </div>
+      </div>
+
+      <!-- 入室証カードコンテナ -->
+      <div id="id-card-container" class="hidden space-y-4">
+        
+        <!-- 横型クレジットカードサイズ入室証カード -->
+        <div id="digital-student-id-card" class="credit-card-ratio mx-auto bg-white text-neutral-900 rounded-2xl p-4 shadow-xl relative border border-stone-300 flex flex-col justify-between overflow-hidden">
+          
+          <!-- クレジットカード風の微細格子背景 -->
+          <div class="absolute inset-0 opacity-[0.03] pointer-events-none" style="background-image: radial-gradient(#000 1px, transparent 1px); background-size: 8px 8px;"></div>
+
+          <!-- カード上部（ヘッダー） -->
+          <div class="flex justify-between items-start border-b border-stone-200 pb-2 z-10">
+            <div class="text-left">
+              <h3 class="text-xs font-black tracking-widest text-neutral-900 font-mono leading-none">RJS ACADEMY</h3>
+              <p class="text-[7px] text-stone-400 tracking-wider uppercase font-mono leading-none mt-1">STUDENT IDENTIFICATION CARD</p>
+            </div>
+            <div class="text-right">
+              <span id="card-grade" class="text-[8px] font-black tracking-wider text-neutral-900 border border-neutral-900 px-1.5 py-0.2 rounded font-mono uppercase">---</span>
+            </div>
+          </div>
+
+          <!-- カード中央・下部（情報とQRコードを横並びに美しく配置） -->
+          <div class="flex h-full items-center py-2 z-10 gap-4 overflow-hidden">
+            
+            <!-- 左半分：生徒のプロフィール情報 -->
+            <div class="w-[52%] flex space-x-2.5 items-center">
+              <!-- 写真エリア（モノトーンシルエット） -->
+              <div class="w-14 h-18 bg-stone-100 rounded-lg flex items-center justify-center border border-stone-200 relative overflow-hidden flex-shrink-0">
+                <i class="fa-solid fa-user text-2xl text-stone-400"></i>
+                <!-- ゴールド・シルバー風ICチップをモノトーンに再現 -->
+                <div class="absolute top-1 left-1 w-4 h-3 bg-stone-300 rounded-[2px] border border-stone-400 flex flex-wrap p-0.5 opacity-80">
+                  <div class="w-full h-[1px] bg-stone-500"></div>
+                  <div class="w-[1px] h-full bg-stone-500 mx-auto"></div>
+                </div>
+              </div>
+
+              <!-- 個人テキスト情報 -->
+              <div class="text-left space-y-0.5 overflow-hidden flex-grow">
+                <div class="text-[7px] text-stone-400 font-mono tracking-wider leading-none">STUDENT NAME</div>
+                <div id="card-name" class="text-sm font-black truncate text-neutral-950 leading-tight">---</div>
+                <div id="card-kana" class="text-[8px] font-medium text-stone-500 truncate leading-none mb-1">---</div>
+
+                <div class="flex space-x-3 pt-1 border-t border-stone-200">
+                  <div>
+                    <div class="text-[6px] text-stone-400 font-mono leading-none">CLASS</div>
+                    <div id="card-class" class="text-[10px] font-bold font-mono text-neutral-900 leading-none mt-0.5">---</div>
+                  </div>
+                  <div>
+                    <div class="text-[6px] text-stone-400 font-mono leading-none">GENDER</div>
+                    <div id="card-gender" class="text-[10px] font-bold text-neutral-900 leading-none mt-0.5">---</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 右半分：最強QRコードエリア（コントラスト最大） -->
+            <div class="w-[48%] flex flex-col items-center justify-center bg-white p-1.5 rounded-xl border border-stone-200 h-full">
+              <div class="w-full flex justify-center py-0.5">
+                <!-- QRコード描画エリア -->
+                <div id="qrcode" class="bg-white p-0.5 rounded"></div>
+              </div>
+              <div id="card-student-id-display" class="text-[10px] font-bold font-mono tracking-wider text-neutral-950 mt-1 leading-none">---</div>
+            </div>
+
+          </div>
+
+          <!-- セキュリティセキュリティスタンプ風デザイン -->
+          <div class="absolute -right-6 -bottom-6 opacity-[0.03] pointer-events-none">
+            <i class="fa-solid fa-shield text-8xl"></i>
+          </div>
+        </div>
+
+        <!-- アクションボタン群 (モノトーン) -->
+        <div class="flex flex-col gap-2 max-w-sm mx-auto">
+          <p class="text-center text-stone-500 text-[10px] font-medium">
+            <i class="fa-solid fa-circle-info mr-1"></i> 誤り訂正レベルHの最高読取QRコードを搭載。受付機にかざしてください。
+          </p>
+          <div class="flex gap-2">
+            <button onclick="zoomCard()" class="flex-1 bg-neutral-900 hover:bg-black text-white font-bold py-2.5 rounded-xl shadow text-xs flex items-center justify-center space-x-1 transition">
+              <i class="fa-solid fa-expand"></i> <span>拡大して見せる</span>
+            </button>
+            <button onclick="downloadCardImage()" class="flex-1 bg-white hover:bg-stone-50 text-stone-800 font-bold py-2.5 rounded-xl border border-stone-300 text-xs flex items-center justify-center space-x-1 transition">
+              <i class="fa-solid fa-download"></i> <span>画像として保存</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================== 2. 受付・管理用画面 (PC大画面用ダッシュボード構成) ================== -->
+    <section id="view-admin" class="hidden space-y-6">
+      
+      <!-- メインのグリッドシステム：PC大画面（12カラム構成） -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        
+        <!-- 左側：スキャナー ＆ 判定コントロール（5カラム） -->
+        <div class="lg:col-span-5 space-y-6">
+          
+          <!-- スキャンカメラカード -->
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-stone-200">
+            <div class="flex justify-between items-center mb-3">
+              <h3 class="font-bold text-stone-800 text-sm flex items-center">
+                <i class="fa-solid fa-qrcode mr-2 text-neutral-900"></i>PCカメラ / 受付スキャナー
+              </h3>
+              <span id="camera-status" class="text-xs bg-stone-100 text-stone-600 border border-stone-200 px-3 py-0.5 rounded-full font-bold">
+                オフライン
+              </span>
+            </div>
+            
+            <!-- カメラ画面プレビュー（PC画面に映える大サイズ設計） -->
+            <div class="relative bg-black rounded-2xl overflow-hidden aspect-video w-full flex items-center justify-center border border-stone-200 shadow-inner">
+              <div id="reader" class="w-full"></div>
+              <div id="camera-placeholder" class="absolute inset-0 flex flex-col items-center justify-center text-stone-500 space-y-2 pointer-events-none z-10">
+                <div class="w-14 h-14 bg-stone-100 rounded-full flex items-center justify-center text-neutral-800 mb-1 shadow-sm">
+                  <i class="fa-solid fa-camera text-2xl animate-pulse"></i>
+                </div>
+                <span class="text-xs font-bold text-stone-400">「カメラ起動」ボタンを押してください</span>
+              </div>
+            </div>
+
+            <!-- 操作ボタン -->
+            <div class="mt-4 flex gap-3">
+              <button id="btn-start-camera" onclick="startScanner()" class="flex-1 bg-neutral-900 hover:bg-black text-white font-bold py-3 px-4 rounded-xl shadow flex items-center justify-center space-x-2 transition">
+                <i class="fa-solid fa-play"></i> <span>カメラ起動 (スキャン)</span>
+              </button>
+              <button id="btn-stop-camera" onclick="stopScanner()" class="flex-1 bg-stone-200 hover:bg-stone-300 text-stone-700 font-bold py-3 px-4 rounded-xl flex items-center justify-center space-x-2 transition" disabled>
+                <i class="fa-solid fa-stop"></i> <span>スキャン停止</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- リアルタイム打刻お知らせポップアップ（常設型大型モニター） -->
+          <div id="alert-box" class="transform scale-95 opacity-0 pointer-events-none transition-all duration-300 bg-white p-4 rounded-2xl shadow-md border-l-8 border-stone-800 flex items-center space-x-4">
+            <div id="alert-icon-bg" class="w-12 h-12 rounded-full flex items-center justify-center text-xl text-white bg-neutral-900 flex-shrink-0 shadow-sm">
+              <i id="alert-icon" class="fa-solid fa-circle-info"></i>
+            </div>
+            <div class="flex-grow overflow-hidden">
+              <div class="flex items-center justify-between">
+                <span id="alert-badge" class="text-[10px] font-bold px-2 py-0.5 rounded text-white bg-neutral-900">-</span>
+                <span id="alert-class" class="text-xs font-mono font-bold text-stone-400">CLASS: --</span>
+              </div>
+              <h4 id="alert-title" class="font-extrabold text-stone-800 text-base truncate mt-0.5">---</h4>
+              <p id="alert-desc" class="text-xs text-stone-500 font-mono truncate">ID: --</p>
+            </div>
+          </div>
+
+          <!-- 手動打刻＆検索パネル -->
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-stone-200">
+            <h3 class="font-bold text-stone-800 text-sm mb-3 flex items-center">
+              <i class="fa-solid fa-keyboard mr-2 text-neutral-900"></i>学籍番号・名前から手動受付
+            </h3>
+            
+            <div class="space-y-3">
+              <div class="relative">
+                <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-stone-400">
+                  <i class="fa-solid fa-search text-xs"></i>
+                </span>
+                <input type="text" id="admin-manual-search" oninput="filterAdminSuggestions(this.value)" placeholder="学籍番号か名前で名簿検索..." 
+                  class="w-full pl-9 pr-4 py-2 bg-stone-50 border border-stone-200 rounded-lg outline-none text-xs">
+                
+                <!-- PC用サジェストドロップダウン -->
+                <div id="admin-suggestions" class="mt-1 bg-white border border-stone-200 rounded-xl max-h-48 overflow-y-auto hidden shadow-2xl absolute z-50 w-full">
+                  <!-- 動的に追加 -->
+                </div>
+              </div>
+
+              <div class="flex gap-2">
+                <input type="text" id="manual-student-id" placeholder="学籍番号を直接入力 (例: RJS240001M)" 
+                  class="flex-1 px-3 py-2 bg-stone-50 border border-stone-200 rounded-lg outline-none font-mono text-xs text-stone-800 uppercase">
+                <button onclick="processManualInput()" class="bg-neutral-800 hover:bg-black text-white font-bold px-5 py-2 rounded-lg text-xs transition">
+                  受付打刻
+                </button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- 右側：リアルタイム入室者リスト ＆ 総合ログ一覧（7カラム） -->
+        <div class="lg:col-span-7 space-y-6">
+          
+          <!-- カウンタースタッツカード -->
+          <div class="grid grid-cols-2 gap-4">
+            <div class="bg-stone-900 text-white p-5 rounded-2xl shadow-sm border border-stone-800">
+              <span class="text-xs opacity-70 font-semibold tracking-wider">現在入室中の学生</span>
+              <div class="flex items-baseline space-x-2 mt-2">
+                <span id="stat-active-count" class="text-4xl font-extrabold font-mono">0</span>
+                <span class="text-xs opacity-75">名</span>
+              </div>
+            </div>
+            <div class="bg-white text-stone-800 p-5 rounded-2xl shadow-sm border border-stone-200">
+              <span class="text-xs text-stone-500 font-semibold tracking-wider">本日の総打刻回数</span>
+              <div class="flex items-baseline space-x-2 mt-2">
+                <span id="stat-total-scans" class="text-4xl font-extrabold font-mono text-neutral-900">0</span>
+                <span class="text-xs text-stone-400">回</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- テーブル：現在入室中リスト -->
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-stone-200 flex flex-col h-[340px]">
+            <div class="flex justify-between items-center mb-3">
+              <h3 class="font-bold text-stone-800 text-sm flex items-center">
+                <i class="fa-solid fa-circle-user text-neutral-800 mr-2 animate-pulse"></i>現在入室中
+              </h3>
+              
+              <!-- クラスによる並び替え/フィルタ -->
+              <select id="class-filter" onchange="updateDashboard()" class="text-xs border border-stone-300 rounded px-2 py-1 bg-white outline-none font-semibold text-stone-700">
+                <option value="ALL">全ての学年・クラス</option>
+                <option value="1">1年 (RJS26~)</option>
+                <option value="2">2年 (RJS25~)</option>
+                <option value="3">3年 (RJS24~)</option>
+                <option value="A">A組</option>
+                <option value="B">B組</option>
+                <option value="C">C組</option>
+                <option value="D">D組</option>
+                <option value="E">E組</option>
+              </select>
+            </div>
+            
+            <div class="overflow-y-auto flex-grow border border-stone-100 rounded-xl" id="active-students-container">
+              <!-- 空状態 -->
+              <div id="active-empty-state" class="flex flex-col items-center justify-center h-full text-stone-400 py-8">
+                <i class="fa-solid fa-users-slash text-2xl mb-2"></i>
+                <p class="text-xs font-bold">現在入室中の学生はいません</p>
+              </div>
+              
+              <!-- データテーブル -->
+              <table id="active-students-table" class="min-w-full divide-y divide-stone-100 hidden text-xs">
+                <thead class="bg-stone-50 sticky top-0 z-10">
+                  <tr>
+                    <th class="px-4 py-2.5 text-left font-bold text-stone-500 uppercase tracking-wider">クラス/氏名</th>
+                    <th class="px-4 py-2.5 text-left font-bold text-stone-500 uppercase tracking-wider">学籍番号</th>
+                    <th class="px-4 py-2.5 text-left font-bold text-stone-500 uppercase tracking-wider">入室時間</th>
+                    <th class="px-4 py-2.5 text-right font-bold text-stone-500 uppercase tracking-wider">操作</th>
+                  </tr>
+                </thead>
+                <tbody id="active-students-tbody" class="bg-white divide-y divide-stone-100 font-medium">
+                  <!-- 動的生成 -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- リスト：本日のログ（履歴） -->
+          <div class="bg-white p-5 rounded-2xl shadow-sm border border-stone-200 flex flex-col h-[280px]">
+            <div class="flex justify-between items-center mb-3">
+              <h3 class="font-bold text-stone-800 text-sm flex items-center">
+                <i class="fa-solid fa-clock-rotate-left text-neutral-800 mr-2"></i>打刻ログ (最新履歴)
+              </h3>
+              <button onclick="clearLogs()" class="text-xs text-red-500 hover:text-red-700 font-semibold transition">
+                履歴クリア
+              </button>
+            </div>
+            
+            <div class="overflow-y-auto flex-grow border border-stone-100 rounded-xl" id="log-container">
+              <div id="log-empty-state" class="flex flex-col items-center justify-center h-full text-stone-400 py-8">
+                <i class="fa-solid fa-list-ul text-2xl mb-2"></i>
+                <p class="text-xs font-bold">打刻履歴はありません</p>
+              </div>
+              <div id="log-list" class="divide-y divide-stone-100 hidden">
+                <!-- 動的生成 -->
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- 全画面入室証拡大モーダル (白黒モダン) -->
+  <div id="zoom-modal" onclick="closeZoomCard()" class="fixed inset-0 bg-stone-950/98 z-50 flex flex-col justify-center items-center p-4 opacity-0 pointer-events-none transition-all duration-300">
+    <div class="text-stone-300 text-[10px] mb-4 font-bold tracking-widest uppercase opacity-75">
+      <i class="fa-solid fa-expand-arrows-alt mr-1"></i> 画面タップで閉じる
+    </div>
+    <div id="zoomed-card-target" class="w-full max-w-sm transform scale-90 transition-transform duration-300">
+      <!-- ここに拡大コピーが入る -->
+    </div>
+  </div>
+
+  <!-- スクリプト -->
+  <script>
+    // --- 1. 名簿データベース定義 ---
+    const rawDatabaseString = `RJS240001M/青木 朝陽/あおき あさひ/3A01,RJS240002M/青木 樹/あおき いつき/3B01,RJS240003M/青木 一馬/あおき かずま/3C01,RJS240004F/青木 心春/あおき こはる/3D01,RJS240005F/青木 菜々子/あおき ななこ/3E01,RJS240006F/青木 莉子/あおき りこ/3A02,RJS240007F/阿部 彩夏/あべ あやか/3B02,RJS240008F/阿部 彩夏/あべ あやか/3C02,RJS240009F/池田 千尋/いけだ ちひろ/3D02,RJS240010F/池田 愛美/いけだ まなみ/3E02,RJS240011F/池田 愛美/いけだ まなみ/3A03,RJS240012F/石井 陽葵/いしい ひまり/3B03,RJS240013F/石井 莉子/いしい りこ/3C03,RJS240014M/石井 蓮/いしい れん/3D03,RJS240015F/石川 彩夏/いしかわ あやか/3E03,RJS240016M/石川 駿/いしかわ しゅん/3A04,RJS240017F/石川 舞/いしかわ まい/3B04,RJS240018M/伊藤 新/いとう あらた/3C04,RJS240019M/伊藤 健太/いとう けんた/3D04,RJS240020F/伊藤 琴音/いとう ことね/3E04,RJS240021M/伊藤 拓海/いとう たくみ/3A05,RJS240022M/伊藤 大輔/いとう だいすけ/3B05,RJS240023M/井上 新/いのうえ あらた/3C05,RJS240024M/井上 誠/いのうえ まこと/3D05,RJS240025M/井上 悠真/いのうえ ゆうま/3E05,RJS240026F/遠藤 彩夏/えんどう あやか/3A06,RJS240027F/太田 彩夏/おおた あやか/3B06,RJS240028F/太田 咲良/おおた さくら/3C06,RJS240029F/太田 舞/おおた まい/3D06,RJS240030F/太田 芽依/おおた めい/3E06,RJS240031F/太田 結愛/おおた ゆあ/3A07,RJS240032F/太田 莉子/おおた りこ/3B07,RJS240033F/岡田 凛/おかだ りん/3C07,RJS240034M/岡田 蓮/おかだ れん/3D07,RJS240035F/岡本 千尋/おかもと ちひろ/3E07,RJS240036F/岡本 菜々子/おかもと ななこ/3A08,RJS240037F/岡本 菜々子/おかもと ななこ/3B08,RJS240038M/岡本 湊/おかもと みなと/3C08,RJS240039F/岡本 芽依/おかもと めい/3D08,RJS240040F/小川 葵/おがわ あおい/3E08,RJS240041M/小川 陽翔/おがわ はると/3A09,RJS240042M/小川 悠真/おがわ ゆうま/3B09,RJS240043M/小川 悠真/おがわ ゆうま/3C09,RJS240044M/金子 新/かねこ あらた/3D09,RJS240045F/金子 舞/かねこ まい/3E09,RJS240046M/木村 新/きむら あらた/3A10,RJS240047F/木村 咲良/きむら さくら/3B10,RJS240048M/木村 駿/きむら しゅん/3C10,RJS240049M/木村 颯太/きむら そうた/3D10,RJS240050M/木村 拓海/きむら たくみ/3E10,RJS240051M/木村 陽翔/きむら はると/3A11,RJS240052M/木村 陽翔/きむら はると/3B11,RJS240053M/木村 陽翔/きむら はると/3C11,RJS240054M/小林 翔/こばやし しょう/3D11,RJS240055M/小林 太陽/こばやし たいよう/3E11,RJS240056M/近藤 駿/こんどう しゅん/3A12,RJS240057M/近藤 翔/こんどう しょう/3B12,RJS240058M/近藤 太陽/こんどう たいよう/3C12,RJS240059M/後藤 一馬/ごとう かずま/3D12,RJS240060M/後藤 駿/ごとう しゅん/3E12,RJS240061M/後藤 翔/ごとう しょう/3A13,RJS240062M/後藤 翼/ごとう つばさ/3B13,RJS240063F/後藤 愛美/ごとう まなみ/3C13,RJS240064M/斎藤 颯太/さいとう そうた/3D13,RJS240065M/斎藤 太陽/さいとう たいよう/3E13,RJS240066M/斉藤 大輔/さいとう だいすけ/3A14,RJS240067M/斎藤 大輔/さいとう だいすけ/3B14,RJS240068M/斉藤 大翔/さいとう ひろと/3C14,RJS240069F/斎藤 舞/さいとう まい/3D14,RJS240070F/斉藤 結愛/さいとう ゆあ/3E14,RJS240071F/坂本 琴音/さかもと ことね/3A15,RJS240072F/坂本 結菜/さかもと ゆいな/3B15,RJS240073F/佐々木 心春/ささき こはる/3C15,RJS240074F/佐々木 咲良/ささき さくら/3D15,RJS240075F/佐々木 美月/ささき みつき/3E15,RJS240076F/佐々木 莉子/ささき りこ/3A16,RJS240077M/佐藤 悠真/さとう ゆうま/3B16,RJS240078M/清水 朝陽/しみず あさひ/3C16,RJS240079M/清水 新/しみず あらた/3D16,RJS240080F/清水 杏/しみず あん/3E16,RJS240081M/鈴木 一馬/すずき かずま/3A17,RJS240082M/鈴木 大輔/すずき だいすけ/3B17,RJS240083F/高橋 琴音/たかはし ことね/3C17,RJS240084F/高橋 さくら/たかはし さくら/3D17,RJS240085M/高橋 翔/たかはし しょう/3E17,RJS240086M/高橋 大輔/たかはし だいすけ/3A18,RJS240087F/高橋 陽葵/たかはし ひまり/3B18,RJS240088F/高橋 美月/たかはし みつき/3C18,RJS240089F/田中 杏/たなか あん/3D18,RJS240090M/田中 駿/たなか しゅん/3E18,RJS240091M/田中 大輔/たなか だいすけ/3A19,RJS240092M/中島 健太/なかじま けんた/3B19,RJS240093F/中島 心春/なかじま こはる/3C19,RJS240094M/中島 大輔/なかじま だいすけ/3D19,RJS240095M/中島 大翔/なかじま ひろと/3E19,RJS240096M/中野 朝陽/なかの あさひ/3A20,RJS240097M/中野 太陽/なかの たいよう/3B20,RJS240098M/中野 翼/なかの つばさ/3C20,RJS240099M/中野 湊/なかの みなと/3D20,RJS240100F/中村 千尋/なかむら ちひろ/3E20,RJS240101F/中村 紬/なかむら つむぎ/3A21,RJS240102M/中村 湊/なかむら みなと/3B21,RJS240103F/西村 杏/にしむら あん/3C21,RJS240104M/西村 駿/にしむら しゅん/3D21,RJS240105F/西村 愛美/にしむら まなみ/3E21,RJS240106M/橋本 樹/はしもと いつき/3A22,RJS240107M/橋本 拓海/はしもと たくみ/3B22,RJS240108M/橋本 悠真/はしもと ゆうま/3C22,RJS240109F/橋本 莉子/はしもと りこ/3D22,RJS240110M/長谷川 樹/はせがわ いつき/3E22,RJS240111M/長谷川 湊/はせがわ みなと/3A23,RJS240112M/林 陸/はやし りく/3B23,RJS240113M/福田 樹/ふくだ いつき/3C23,RJS240114F/福田 琴音/ふくだ ことね/3D23,RJS240115F/福田 咲良/ふくだ さくら/3E23,RJS240116F/福田 舞/ふくだ まい/3A24,RJS240117M/福田 悠真/ふくだ ゆうま/3B24,RJS240118M/藤井 樹/ふじい いつき/3C24,RJS240119M/藤田 拓海/ふじた たくみ/3D24,RJS240120F/藤田 結菜/ふじた ゆいな/3E24,RJS240121M/藤原 新/ふじわら あらた/3A25,RJS240122M/藤原 健太/ふじわら けんた/3B25,RJS240123F/藤原 さくら/ふじわら さくら/3C25,RJS240124F/藤原 美月/ふじわら みつき/3D25,RJS240125F/前田 莉子/まえだ りこ/3E25,RJS240126M/前田 蓮/まえだ れん/3A26,RJS240127M/松本 翼/まつもと つばさ/3B26,RJS240128M/松本 陽翔/まつもと はると/3C26,RJS240129M/松本 悠真/まつもと ゆうま/3D26,RJS240130M/三浦 新/みうら あらた/3E26,RJS240131M/三浦 健太/みうら けんた/3A27,RJS240132F/三浦 心春/みうら こはる/3B27,RJS240133M/三浦 誠/みうら まこと/3C27,RJS240134F/村上 葵/むらかみ あおい/3D27,RJS240135M/村上 健太/むらかみ けんた/3E27,RJS240136F/村上 美月/むらかみ みつき/3A28,RJS240137M/村上 悠真/むらかみ ゆうま/3B28,RJS240138F/村上 莉子/むらかみ りこ/3C28,RJS240139F/森 咲良/もり さくら/3D28,RJS240140M/森 駿/もり しゅん/3E28,RJS240141M/森 陽翔/もり はると/3A29,RJS240142F/森 芽依/もり めい/3B29,RJS240143F/山口 菜々子/やまぐち ななこ/3C29,RJS240144M/山口 陽翔/やまぐち はると/3D29,RJS240145F/山口 美月/やまぐち みつき/3E29,RJS240146F/山口 結菜/やまぐち ゆいな/3A30,RJS240147F/山口 凛/やまぐち りん/3B30,RJS240148F/山崎 陽葵/やまざき ひまり/3C30,RJS240149M/山崎 大翔/やまざき ひろと/3D30,RJS240150M/山下 健太/やました けんた/3E30,RJS240151F/山下 遥/やました はるか/3A31,RJS240152M/山本 太陽/やまもと たいよう/3B31,RJS240153F/山本 菜々子/やまもと ななこ/3C31,RJS240154M/山本 陸/やまもと りく/3D31,RJS240155M/吉田 一馬/よしだ かずま/3E31,RJS240156M/吉田 太陽/よしだ たいよう/3A32,RJS240157F/吉田 菜々子/よしだ ななこ/3B32,RJS240158F/吉田 陽葵/よしだ ひまり/3C32,RJS240159F/吉田 陽葵/よしだ ひまり/3D32,RJS240160F/吉田 舞/よしだ まい/3E32,RJS240161F/渡辺 葵/わたなべ あおい/3A33,RJS240162M/渡辺 新/わたなべ あらた/3B33,RJS240163F/渡辺 さくら/わたなべ さくら/3C33,RJS240164M/渡辺 陽翔/わたなべ はると/3D33,RJS240165F/渡辺 愛美/わたなべ まなみ/3E33,RJS240166F/渡辺 結菜/わたなべ ゆいな/3A34,RJS250001F/青木 彩夏/あおき あやか/2A01,RJS250002M/青木 翼/あおき つばさ/2B01,RJS250003M/青木 湊/あおき みなと/2C01,RJS250004F/阿部 彩夏/あべ あやか/2D01,RJS250005M/阿部 駿/あべ しゅん/2E01,RJS250006F/阿部 陽葵/あべ ひまり/2A02,RJS250007F/池田 杏/いけだ あん/2B02,RJS250008F/池田 琴音/いけだ ことね/2C02,RJS250009F/石井 心春/いしい こはる/2D02,RJS250010M/石井 翔/いしい しょう/2E02,RJS250011M/石井 颯太/いしい そうた/2A03,RJS250012M/石井 大輝/いしい だいき/2B03,RJS250013F/石井 美月/いしい みつき/2C03,RJS250014F/石井 結愛/いしい ゆあ/2D03,RJS250015F/石井 結菜/いしい ゆいな/2E03,RJS250016F/伊藤 千尋/いとう ちひろ/2A04,RJS250017F/伊藤 陽葵/いとう ひまり/2B04,RJS250018M/伊藤 大翔/いとう ひろと/2C04,RJS250019F/井上 杏/いのうえ あん/2D04,RJS250020M/井上 樹/いのうえ いつき/2E04,RJS250021M/井上 樹/いのうえ いつき/2A05,RJS250022M/井上 健太/いのうえ けんた/2B05,RJS250023F/井上 遥/いのうえ はるか/2C05,RJS250024F/遠藤 咲良/えんどう さくら/2D05,RJS250025M/遠藤 陽翔/えんどう はると/2E05,RJS250026M/遠藤 悠真/えんどう ゆうま/2A06,RJS250027F/太田 彩夏/おおた あやか/2B06,RJS250028M/太田 翔/おおた しょう/2C06,RJS250029M/太田 湊/おおた みなと/2D06,RJS250030M/太田 湊/おおた みなと/2E06,RJS250031M/岡田 一馬/おかだ かずま/2A07,RJS250032M/岡田 健太/おかだ けんた/2B07,RJS250033M/岡田 駿/おかだ しゅん/2C07,RJS250034F/岡田 美月/おかだ みつき/2D07,RJS250035F/岡本 結菜/おかもと ゆいな/2E07,RJS250036M/小川 一馬/おがわ かずま/2A08,RJS250037M/小川 颯太/おがわ そうた/2B08,RJS250038M/小川 誠/おがわ まこと/2C08,RJS250039M/小川 蓮/おがわ れん/2D08,RJS250040M/加藤 朝陽/かとう あさひ/2E08,RJS250041M/加藤 一馬/かとう かずま/2A09,RJS250042M/加藤 陽翔/かとう はると/2B09,RJS250043F/加藤 芽依/かとう めい/2C09,RJS250044M/金子 太陽/かねこ たいよう/2D09,RJS250045F/金子 千尋/かねこ ちひろ/2E09,RJS250046F/金子 菜々子/かねこ ななこ/2A10,RJS250047M/金子 悠真/かねこ ゆうま/2B10,RJS250048F/木村 杏/きむら あん/2C10,RJS250049M/木村 悠真/きむら ゆうま/2D10,RJS250050M/近藤 大輝/こんどう だいき/2E10,RJS250051F/近藤 千尋/こんどう ちひろ/2A11,RJS250052M/近藤 陽翔/こんどう はると/2B11,RJS250053F/後藤 彩夏/ごとう あやか/2C11,RJS250054M/後藤 一馬/ごとう かずま/2D11,RJS250055F/後藤 心春/ごとう こはる/2E11,RJS250056M/斉藤 朝陽/さいとう あさひ/2A12,RJS250057M/斉藤 健太/さいとう けんた/2B12,RJS250058F/斎藤 さくら/さいとう さくら/2C12,RJS250059M/斉藤 太陽/さいとう たいよう/2D12,RJS250060M/斎藤 大輝/さいとう だいき/2E12,RJS250061F/斉藤 菜々子/さいとう ななこ/2A13,RJS250062F/斎藤 遥/さいとう はるか/2B13,RJS250063F/斎藤 舞/さいとう まい/2C13,RJS250064F/坂本 舞/さかもと まい/2D13,RJS250065M/佐々木 誠/ささき まこと/2E13,RJS250066F/佐々木 美月/ささき みつき/2A14,RJS250067M/佐々木 悠真/ささき ゆうま/2B14,RJS250068M/佐藤 健太/さとう けんた/2C14,RJS250069F/佐藤 千尋/さとう ちひろ/2D14,RJS250070M/佐藤 悠真/さとう ゆうま/2E14,RJS250071M/清水 樹/しみず いつき/2A15,RJS250072M/清水 駿/しみず しゅん/2B15,RJS250073F/清水 紬/しみず つむぎ/2C15,RJS250074F/清水 遥/しみず はるか/2D15,RJS250075F/清水 美月/しみず みつき/2E15,RJS250076M/鈴木 新/すずき あらた/2A16,RJS250077F/鈴木 杏/すずき あん/2B16,RJS250078F/鈴木 さくら/すずき さくら/2C16,RJS250079M/鈴木 翔/すずき しょう/2D16,RJS250080M/鈴木 湊/すずき みなと/2E16,RJS250081M/高橋 樹/たかはし いつき/2A17,RJS250082F/高橋 芽依/たかはし めい/2B17,RJS250083M/田中 翔/たなか しょう/2C17,RJS250084M/田中 太陽/たなか たいよう/2D17,RJS250085M/田中 翼/たなか つばさ/2E17,RJS250086F/田中 遥/たなか はるか/2A18,RJS250087F/中島 彩夏/なかじま あやか/2B18,RJS250088F/中島 杏/なかじま あん/2C18,RJS250089F/中野 葵/なかの あおい/2D18,RJS250090M/中野 新/なかの あらた/2E18,RJS250091M/中野 翔/なかの しょう/2A19,RJS250092F/中野 愛美/なかの まなみ/2B19,RJS250093M/中野 陸/なかの りく/2C19,RJS250094M/中村 朝陽/なかむら あさひ/2D19,RJS250095M/中村 一馬/なかむら かずま/2E19,RJS250096M/中村 拓海/なかむら たくみ/2A20,RJS250097M/中村 大輔/なかむら だいすけ/2B20,RJS250098F/中村 紬/なかむら つむぎ/2C20,RJS250099F/中村 菜々子/なかむら ななこ/2D20,RJS250100F/中村 結菜/なかむら ゆいな/2E20,RJS250101M/中村 陸/なかむら りく/2A21,RJS250102M/西村 健太/にしむら けんた/2B21,RJS250103F/西村 琴音/にしむら ことね/2C21,RJS250104F/橋本 彩夏/はしもと あやか/2D21,RJS250105M/橋本 翔/はしもと しょう/2E21,RJS250106F/長谷川 彩夏/はせがわ あやか/2A22,RJS250107F/長谷川 陽葵/はせがわ ひまり/2B22,RJS250108F/長谷川 芽依/はせがわ めい/2C22,RJS250109F/長谷川 結愛/はせがわ ゆあ/2D22,RJS250110F/林 杏/はやし あん/2E22,RJS250111M/林 翔/はやし しょう/2A23,RJS250112F/林 舞/はやし まい/2B23,RJS250113M/林 悠真/はやし ゆうま/2C23,RJS250114F/福田 彩夏/ふくだ あやか/2D23,RJS250115F/福田 咲良/ふくだ さくら/2E23,RJS250116M/福田 大輝/ふくだ だいき/2A24,RJS250117F/藤井 葵/ふじい あおい/2B24,RJS250118F/藤井 葵/ふじい あおい/2C24,RJS250119F/藤井 愛美/ふじい まなみ/2D24,RJS250120F/藤井 芽依/ふじい めい/2E24,RJS250121M/藤井 陸/ふじい りく/2A25,RJS250122F/藤原 心春/ふじわら こはる/2B25,RJS250123M/藤原 拓海/ふじわら たくみ/2C25,RJS250124F/藤原 愛美/ふじわら まなみ/2D25,RJS250125M/藤原 陸/ふじわら りく/2E25,RJS250126F/前田 葵/まえだ あおい/2A26,RJS250127M/前田 駿/まえだ しゅん/2B26,RJS250128M/前田 颯太/まえだ そうた/2C26,RJS250129F/前田 美月/まえだ みつき/2D26,RJS250130F/前田 凛/まえだ りん/2E26,RJS250131M/松本 朝陽/まつもと あさひ/2A27,RJS250132M/松本 健太/まつもと けんた/2B27,RJS250133F/松本 千尋/まつもと ちひろ/2C27,RJS250134F/松本 紬/まつもと つむぎ/2D27,RJS250135F/松本 美月/まつもと みつき/2E27,RJS250136M/松本 蓮/まつもと れん/2A28,RJS250137F/三浦 美月/みうら みつき/2B28,RJS250138F/三浦 結愛/みうら ゆあ/2C28,RJS250139F/村上 杏/むらかみ あん/2D28,RJS250140M/村上 誠/むらかみ まこと/2E28,RJS250141F/村上 美月/むらかみ みつき/2A29,RJS250142M/村上 湊/むらかみ みなと/2B29,RJS250143F/森 葵/もり あおい/2C29,RJS250144F/森 彩夏/もり あやか/2D29,RJS250145F/森 千尋/もり ちひろ/2E29,RJS250146F/森 遥/もり はるか/2A30,RJS250147F/森 結愛/もり ゆあ/2B30,RJS250148F/山口 葵/やまぐち あおい/2C30,RJS250149F/山口 葵/やまぐち あおい/2D30,RJS250150F/山口 杏/やまぐち あん/2E30,RJS250151M/山崎 朝陽/やまざき あさひ/2A31,RJS250152M/山崎 新/やまざき あらた/2B31,RJS250153F/山崎 杏/やまざき あん/2C31,RJS250154M/山下 新/やました あらた/2D31,RJS250155F/山下 杏/やました あん/2E31,RJS250156M/山下 一馬/やました かずま/2A32,RJS250157M/山下 大輝/やました だいき/2B32,RJS250158F/山下 愛美/やました まなみ/2C32,RJS250159F/山下 結菜/やました ゆいな/2D32,RJS250160F/山田 遥/やまだ はるか/2E32,RJS250161F/山田 愛美/やまだ まなみ/2A33,RJS250162F/山田 莉子/やまだ りこ/2B33,RJS250163F/山田 凛/やまだ りん/2C33,RJS250164M/山本 駿/やまもと しゅん/2D33,RJS250165F/渡辺 心春/わたなべ こはる/2E33,RJS250166M/渡辺 太陽/わたなべ たいよう/2A34,RJS250167F/渡辺 陽葵/わたなべ ひまり/2B34,RJS260001F/青木 彩夏/あおき あやか/1A01,RJS260002F/青木 心春/あおき こはる/1B01,RJS260003F/青木 千尋/あおき ちひろ/1C01,RJS260004M/青木 蓮/あおき れん/1D01,RJS260005M/阿部 大輝/あべ だいき/1E01,RJS260006M/阿部 大輝/あべ だいき/1A02,RJS260007F/阿部 結菜/あべ ゆいな/1B02,RJS260008F/阿部 結菜/あべ ゆいな/1C02,RJS260009M/池田 新/いけだ あらた/1D02,RJS260010F/池田 紬/いけだ つむぎ/1E02,RJS260011M/池田 陸/いけだ りく/1A03,RJS260012F/石井 さくら/いしい さくら/1B03,RJS260013M/石井 太陽/いしい たいよう/1C03,RJS260014M/石井 翼/いしい つばさ/1D03,RJS260015F/石井 菜々子/いしい ななこ/1E03,RJS260016F/石井 遥/いしい はるか/1A04,RJS260017F/石井 美月/いしい みつき/1B04,RJS260018M/石川 健太/いしかわ けんた/1C04,RJS260019M/石川 太陽/いしかわ たいよう/1D04,RJS260020F/石川 紬/いしかわ つむぎ/1E04,RJS260021F/石川 莉子/いしかわ りこ/1A05,RJS260022M/伊藤 悠真/いとう ゆうま/1B05,RJS260023F/井上 さくら/いのうえ さくら/1C05,RJS260024M/井上 駿/いのうえ しゅん/1D05,RJS260025M/遠藤 新/えんどう あらた/1E05,RJS260026F/遠藤 咲良/えんどう さくら/1A06,RJS260027M/遠藤 颯太/えんどう そうた/1B06,RJS260028F/遠藤 陽葵/えんどう ひまり/1C06,RJS260029F/遠藤 結菜/えんどう ゆいな/1D06,RJS260030F/太田 陽葵/おおた ひまり/1E06,RJS260031M/太田 誠/おおた まこと/1A07,RJS260032F/太田 美月/おおた みつき/1B07,RJS260033F/太田 芽依/おおた めい/1C07,RJS260034F/岡田 結愛/おかだ ゆあ/1D07,RJS260035F/岡田 凛/おかだ りん/1E07,RJS260036F/岡本 さくら/おかもと さくら/1A08,RJS260037M/岡本 翔/おかもと しょう/1B08,RJS260038M/岡本 太陽/おかもと たいよう/1C08,RJS260039M/小川 朝陽/おがわ あさひ/1D08,RJS260040M/小川 朝陽/おがわ あさひ/1E08,RJS260041F/小川 彩夏/おがわ あやか/1A09,RJS260042F/小川 舞/おがわ まい/1B09,RJS260043F/小川 芽依/おがわ めい/1C09,RJS260044F/小川 莉子/おがわ りこ/1D09,RJS260045M/加藤 朝陽/かとう あさひ/1E09,RJS260046M/加藤 誠/かとう まこと/1A10,RJS260047M/加藤 悠真/かとう ゆうま/1B10,RJS260048M/金子 翼/かねこ つばさ/1C10,RJS260049F/金子 芽依/かねこ めい/1D10,RJS260050M/木村 颯太/きむら そうた/1E10,RJS260100M/中村 大輝/なかむら だいき/1E20,RJS260101F/中村 千尋/なかむら ちひろ/1A21,RJS260102F/中村 陽葵/なかむら ひまり/1B21,RJS260103F/中村 芽依/なかむら めい/1C21,RJS260104M/中村 蓮/なかむら れん/1D21,RJS260105M/西村 大輝/にしむら だいき/1E21,RJS260106M/西村 大輝/にしむら だいき/1A22,RJS260107M/西村 湊/にしむら みなと/1B22,RJS260108M/橋本 健太/はしもと けんた/1C22,RJS260109F/橋本 さくら/はしもと さくら/1D22,RJS260110M/橋本 拓海/はしもと たくみ/1E22,RJS260111M/橋本 大輝/はしもと だいき/1A23,RJS260112F/橋本 結愛/はしもと ゆあ/1B23,RJS260113M/長谷川 拓海/はせがわ たくみ/1C23,RJS260114M/長谷川 翼/はせがわ つばさ/1D23,RJS260115M/長谷川 誠/はせがわ まこと/1E23,RJS260116F/長谷川 結菜/はせがわ ゆいな/1A24,RJS260117F/林 琴音/はやし ことね/1B24,RJS260118M/林 翼/はやし つばさ/1C24,RJS260119M/福田 大輝/ふくだ だいき/1D24,RJS260120M/福田 蓮/ふくだ れん/1E24,RJS260121M/藤井 樹/ふじい いつき/1A25,RJS260122F/藤井 千尋/ふじい ちひろ/1B25,RJS260123F/藤田 さくら/ふじた さくら/1C25,RJS260124M/藤原 一馬/ふじわら かずま/1D25,RJS260125F/藤原 咲良/ふじわら さくら/1E25,RJS260126M/藤原 太陽/ふじわら たいよう/1A26,RJS260127F/藤原 紬/ふじわら つむぎ/1B26,RJS260128F/藤原 美月/ふじわら みつき/1C26,RJS260129F/藤原 結愛/ふじわら ゆあ/1D26,RJS260130F/藤原 結菜/ふじわら ゆいな/1E26,RJS260131F/前田 杏/まえだ あん/1A27,RJS260132F/前田 千尋/まえだ ちひろ/1B27,RJS260133M/松本 颯太/まつもと そうた/1C27,RJS260134F/松本 愛美/まつもと まなみ/1D27,RJS260135M/三浦 誠/みうら まこと/1E27,RJS260136F/三浦 凛/みうら りん/1A28,RJS260137M/村上 太陽/むらかみ たいよう/1B28,RJS260138F/森 杏/もり あん/1C28,RJS260139F/森 琴音/もり ことね/1D28,RJS260140F/森 陽葵/もり ひまり/1E28,RJS260141M/森 誠/もり まこと/1A29,RJS260142M/森 悠真/もり ゆうま/1B29,RJS260143M/山口 新/やまぐち あらた/1C29,RJS260144M/山口 樹/やまぐち いつき/1D29,RJS260145F/山崎 琴音/やまざき ことね/1E29,RJS260146F/山崎 さくら/やまざき さくら/1A30,RJS260147M/山崎 大翔/やまざき ひろと/1B30,RJS260148M/山崎 誠/やまざき まこと/1C30,RJS260149F/山下 杏/やました あん/1D30,RJS260150M/山下 太陽/やました たいよう/1E30,RJS260151M/山下 大輔/やました だいすけ/1A31,RJS260152F/山下 千尋/やました ちひろ/1B31,RJS260153M/山下 悠真/やました ゆうま/1C31,RJS260154M/山田 駿/やまだ しゅん/1D31,RJS260155F/山田 紬/やまだ つむぎ/1E31,RJS260156M/山田 誠/やまだ まこと/1A32,RJS260157F/山田 凛/やまだ りん/1B32,RJS260158M/山本 朝陽/やまもと あさひ/1C32,RJS260159M/山本 健太/やまもと けんた/1D32,RJS260160M/山本 颯太/やまもと そうた/1E32,RJS260161F/山本 舞/やまもと まい/1A33,RJS260162F/吉田 紬/よしだ つむぎ/1B33,RJS260163F/吉田 陽葵/よしだ ひまり/1C33,RJS260164F/渡辺 杏/わたなべ あん/1D33,RJS260165F/渡辺 紬/わたなべ つむぎ/1E33,RJS260166F/渡辺 愛美/わたなべ まなみ/1A34,RJS260167F/渡辺 結菜/わたなべ ゆいな/1B34`;
+
+    const studentDatabase = [];
+
+    // 名簿データをパースして初期化
+    function initDatabase() {
+      const items = rawDatabaseString.split(',');
+      items.forEach(item => {
+        const parts = item.split('/');
+        if (parts.length >= 4) {
+          const barcodeId = parts[0];
+          const gender = barcodeId.endsWith('M') ? '男子' : (barcodeId.endsWith('F') ? '女子' : '不明');
+          const name = parts[1];
+          const kana = parts[2];
+          const classNo = parts[3];
+
+          let gradeText = "不明";
+          if (barcodeId.includes("RJS26")) gradeText = "中1";
+          else if (barcodeId.includes("RJS25")) gradeText = "中2";
+          else if (barcodeId.includes("RJS24")) gradeText = "中3";
+
+          studentDatabase.push({
+            id: barcodeId,
+            name: name,
+            kana: kana,
+            classNo: classNo,
+            gender: gender,
+            grade: gradeText,
+            classLabel: classNo.substring(0, 2)
+          });
+        }
+      });
+    }
+
+    function findStudent(studentId) {
+      const cleanId = studentId.trim().toUpperCase();
+      return studentDatabase.find(s => s.id === cleanId) || null;
+    }
+
+    // --- 2. 状態管理 ---
+    let activeStudents = new Map();
+    let logs = [];
+    let html5QrcodeScanner = null;
+    let selectedStudent = null;
+    let qrGenerator = null;
+
+    window.onload = function() {
+      initDatabase();
+      loadFromStorage();
+      
+      setInterval(updateClock, 1000);
+      updateClock();
+
+      // 前回選択した生徒がいれば復元
+      const lastId = localStorage.getItem('last_student_id');
+      if (lastId) {
+        const student = findStudent(lastId);
+        if (student) {
+          selectStudentForCard(student);
+        }
+      }
+
+      updateDashboard();
+    };
+
+    function updateClock() {
+      const now = new Date();
+      document.getElementById('header-clock').textContent = now.toTimeString().split(' ')[0];
+    }
+
+    // タブ切替
+    function switchMode(mode) {
+      const tabStudent = document.getElementById('tab-student');
+      const tabAdmin = document.getElementById('tab-admin');
+      const viewStudent = document.getElementById('view-student');
+      const viewAdmin = document.getElementById('view-admin');
+
+      closeSuggestions();
+
+      if (mode === 'student') {
+        stopScanner();
+        tabStudent.className = "flex-1 py-3 text-center rounded-xl font-bold text-sm transition-all duration-200 bg-white text-neutral-900 shadow";
+        tabAdmin.className = "flex-1 py-3 text-center rounded-xl font-bold text-sm transition-all duration-200 text-stone-600 hover:text-stone-900";
+        viewStudent.classList.replace('hidden', 'block');
+        viewAdmin.classList.replace('block', 'hidden');
+      } else {
+        tabStudent.className = "flex-1 py-3 text-center rounded-xl font-bold text-sm transition-all duration-200 text-stone-600 hover:text-stone-900";
+        tabAdmin.className = "flex-1 py-3 text-center rounded-xl font-bold text-sm transition-all duration-200 bg-white text-neutral-900 shadow";
+        viewStudent.classList.replace('block', 'hidden');
+        viewAdmin.classList.replace('hidden', 'block');
+      }
+    }
+
+    function closeSuggestions() {
+      document.getElementById('student-suggestions').classList.add('hidden');
+      document.getElementById('admin-suggestions').classList.add('hidden');
+    }
+
+    // --- 【学生用】名簿検索サジェスト ---
+    function filterStudentSuggestions(query) {
+      const listEl = document.getElementById('student-suggestions');
+      listEl.innerHTML = "";
+
+      const cleanQuery = query.trim().toUpperCase();
+      if (!cleanQuery) {
+        listEl.classList.add('hidden');
+        return;
+      }
+
+      const matches = studentDatabase.filter(s => 
+        s.id.includes(cleanQuery) || 
+        s.name.includes(cleanQuery) || 
+        s.kana.includes(cleanQuery) ||
+        s.classNo.includes(cleanQuery)
+      ).slice(0, 10);
+
+      if (matches.length === 0) {
+        const emptyItem = document.createElement('div');
+        emptyItem.className = "p-3 text-xs text-stone-400 italic text-center bg-white";
+        emptyItem.textContent = "生徒が見つかりません";
+        listEl.appendChild(emptyItem);
+      } else {
+        matches.forEach(student => {
+          const item = document.createElement('div');
+          item.className = "p-3 border-b border-stone-100 hover:bg-stone-50 cursor-pointer text-left bg-white transition";
+          item.innerHTML = `
+            <div class="flex justify-between items-center mb-0.5">
+              <span class="font-mono text-xs font-bold text-neutral-900">${student.id}</span>
+              <span class="text-[10px] bg-stone-100 text-stone-500 px-1 rounded font-mono">${student.classNo}</span>
+            </div>
+            <div class="text-sm font-bold text-slate-800">${student.name}</div>
+            <div class="text-[10px] text-stone-400">${student.kana}</div>
+          `;
+          item.onclick = () => {
+            selectStudentForCard(student);
+            listEl.classList.add('hidden');
+            document.getElementById('student-search-input').value = "";
+          };
+          listEl.appendChild(item);
+        });
+      }
+      listEl.classList.remove('hidden');
+    }
+
+    // デジタル入室証へ反映
+    function selectStudentForCard(student) {
+      selectedStudent = student;
+      
+      document.getElementById('card-grade').textContent = student.grade;
+      document.getElementById('card-name').textContent = student.name;
+      document.getElementById('card-kana').textContent = student.kana;
+      document.getElementById('card-class').textContent = student.classNo;
+      document.getElementById('card-gender').textContent = student.gender;
+      document.getElementById('card-student-id-display').textContent = student.id;
+      
+      document.getElementById('id-card-container').classList.remove('hidden');
+
+      // QRコードを「誤り訂正レベル: H（最高解像度30%エラー復元）」で動的生成
+      const qrContainer = document.getElementById("qrcode");
+      qrContainer.innerHTML = ""; // 以前のQRをクリア
+
+      try {
+        qrGenerator = new QRCode(qrContainer, {
+          text: student.id,
+          width: 80,
+          height: 80,
+          colorDark : "#000000",
+          colorLight : "#ffffff",
+          correctLevel : QRCode.CorrectLevel.H // 最高精度の訂正レベル
+        });
+        localStorage.setItem('last_student_id', student.id);
+      } catch (e) {
+        console.error("QRコード生成エラー:", e);
+      }
+    }
+
+    // 提示用ズームモーダル
+    function zoomCard() {
+      const modal = document.getElementById('zoom-modal');
+      const target = document.getElementById('zoomed-card-target');
+      const originCard = document.getElementById('digital-student-id-card');
+      
+      target.innerHTML = originCard.outerHTML;
+      modal.classList.remove('opacity-0', 'pointer-events-none');
+      setTimeout(() => {
+        target.classList.remove('scale-90');
+        target.classList.add('scale-100');
+      }, 50);
+    }
+
+    function closeZoomCard() {
+      const modal = document.getElementById('zoom-modal');
+      const target = document.getElementById('zoomed-card-target');
+      
+      target.classList.remove('scale-100');
+      target.classList.add('scale-90');
+      
+      setTimeout(() => {
+        modal.classList.add('opacity-0', 'pointer-events-none');
+        target.innerHTML = "";
+      }, 200);
+    }
+
+    // 入室証のダウンロード処理
+    function downloadCardImage() {
+      if (!selectedStudent) return;
+      const cardElement = document.getElementById('digital-student-id-card');
+      
+      html2canvas(cardElement, {
+        useCORS: true,
+        backgroundColor: null,
+        scale: 2
+      }).then(canvas => {
+        const link = document.createElement('a');
+        link.download = `RJS_QR_ID_${selectedStudent.classNo}_${selectedStudent.name}.png`;
+        link.href = canvas.toDataURL();
+        link.click();
+      }).catch(err => {
+        console.error("キャンバス保存エラー:", err);
+        showCustomAlert("保存エラー", "画像の書き出しに失敗しました。", "error");
+      });
+    }
+
+    // --- 【受付用】カメラスキャン設定（PC推奨） ---
+    function startScanner() {
+      document.getElementById('camera-placeholder').classList.add('hidden');
+      document.getElementById('btn-start-camera').disabled = true;
+      document.getElementById('btn-stop-camera').disabled = false;
+      
+      const cameraStatus = document.getElementById('camera-status');
+      cameraStatus.textContent = "起動中...";
+      cameraStatus.className = "text-xs bg-stone-100 text-stone-600 border border-stone-200 px-3 py-0.5 rounded-full font-bold";
+
+      html5QrcodeScanner = new Html5Qrcode("reader");
+      
+      // QRコードをPCの大画面で爆速検知するための読取設定
+      const config = { 
+        fps: 25, // フレームレートを上げてスキャン判定ループを高速化
+        qrbox: (width, height) => {
+          // PC画面中央に合わせやすいサイズ（正方形スキャンターゲット）
+          const size = Math.min(width, height) * 0.75;
+          return { width: size, height: size };
+        }
+      };
+
+      html5QrcodeScanner.start(
+        { facingMode: "environment" }, 
+        config,
+        onScanSuccess,
+        onScanFailure
+      )
+      .then(() => {
+        cameraStatus.textContent = "スキャン稼働中";
+        cameraStatus.className = "text-xs bg-neutral-900 text-white border border-black px-3 py-0.5 rounded-full font-bold animate-pulse";
+      })
+      .catch((err) => {
+        console.error("スキャナー開始エラー:", err);
+        showCustomAlert("カメラ起動失敗", "カメラ設定やプライバシー設定を確認してください。", "error");
+        stopScanner();
+      });
+    }
+
+    function stopScanner() {
+      document.getElementById('btn-start-camera').disabled = false;
+      document.getElementById('btn-stop-camera').disabled = true;
+      document.getElementById('camera-placeholder').classList.remove('hidden');
+
+      const cameraStatus = document.getElementById('camera-status');
+      cameraStatus.textContent = "オフライン";
+      cameraStatus.className = "text-xs bg-stone-100 text-stone-600 border border-stone-200 px-3 py-0.5 rounded-full font-bold";
+
+      if (html5QrcodeScanner) {
+        html5QrcodeScanner.stop().then(() => {
+          html5QrcodeScanner.clear();
+          html5QrcodeScanner = null;
+        }).catch((err) => {
+          console.warn("停止処理:", err);
+          html5QrcodeScanner = null;
+        });
+      }
+    }
+
+    let lastScannedId = "";
+    let lastScanTime = 0;
+
+    function onScanSuccess(decodedText) {
+      const now = Date.now();
+      const cleanId = decodedText.trim().toUpperCase();
+
+      // 重複打刻を3秒防止
+      if (cleanId === lastScannedId && (now - lastScanTime) < 3000) {
+        return; 
+      }
+
+      lastScannedId = cleanId;
+      lastScanTime = now;
+
+      processAttendance(cleanId);
+    }
+
+    function onScanFailure() {
+      // 連続検出スキップ
+    }
+
+    // --- 【受付用】手動打刻用名簿検索 ---
+    function filterAdminSuggestions(query) {
+      const listEl = document.getElementById('admin-suggestions');
+      listEl.innerHTML = "";
+
+      const cleanQuery = query.trim().toUpperCase();
+      if (!cleanQuery) {
+        listEl.classList.add('hidden');
+        return;
+      }
+
+      const matches = studentDatabase.filter(s => 
+        s.id.includes(cleanQuery) || 
+        s.name.includes(cleanQuery) || 
+        s.kana.includes(cleanQuery) ||
+        s.classNo.includes(cleanQuery)
+      ).slice(0, 5);
+
+      if (matches.length === 0) {
+        const emptyItem = document.createElement('div');
+        emptyItem.className = "p-3 text-xs text-stone-400 italic text-center bg-white";
+        emptyItem.textContent = "見つかりません";
+        listEl.appendChild(emptyItem);
+      } else {
+        matches.forEach(student => {
+          const item = document.createElement('div');
+          item.className = "p-3 border-b border-stone-100 hover:bg-stone-50 cursor-pointer text-left text-xs bg-white transition";
+          item.innerHTML = `
+            <div class="flex justify-between font-bold">
+              <span class="text-neutral-900">${student.id}</span>
+              <span class="text-stone-500">${student.classNo}</span>
+            </div>
+            <div class="font-bold text-stone-700">${student.name}</div>
+          `;
+          item.onclick = () => {
+            document.getElementById('manual-student-id').value = student.id;
+            listEl.classList.add('hidden');
+            document.getElementById('admin-manual-search').value = "";
+          };
+          listEl.appendChild(item);
+        });
+      }
+      listEl.classList.remove('hidden');
+    }
+
+    function processManualInput() {
+      const inputEl = document.getElementById('manual-student-id');
+      const cleanId = inputEl.value.trim().toUpperCase();
+
+      if (!cleanId) {
+        showCustomAlert("警告", "学籍番号を選択または打ち込んでください。", "warning");
+        return;
+      }
+
+      processAttendance(cleanId);
+      inputEl.value = "";
+    }
+
+    // --- 3. 入退室コア処理 ---
+    function processAttendance(studentId) {
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const dateStr = now.toLocaleDateString('ja-JP');
+
+      const student = findStudent(studentId);
+
+      if (!student) {
+        playBeep(9);
+        showCustomAlert("未登録エラー", `学籍番号: ${studentId} は登録されていません。`, "error");
+        return;
+      }
+
+      let action = "";
+      
+      if (activeStudents.has(studentId)) {
+        action = "OUT";
+        activeStudents.delete(studentId);
+        playBeep(2); // 退室音
+        showAttendancePopup(student, "退室", "success-out", timeStr);
+      } else {
+        action = "IN";
+        activeStudents.set(studentId, {
+          time: timeStr,
+          timestamp: now.getTime()
+        });
+        playBeep(1); // 入室音
+        showAttendancePopup(student, "入室", "success-in", timeStr);
+      }
+
+      logs.unshift({
+        id: student.id,
+        name: student.name,
+        classNo: student.classNo,
+        action: action,
+        time: timeStr,
+        date: dateStr,
+        timestamp: now.getTime()
+      });
+
+      if (logs.length > 100) logs.pop(); // PCダッシュボード用に最大100件保存
+
+      saveToStorage();
+      updateDashboard();
+    }
+
+    function forceCheckout(studentId) {
+      const student = findStudent(studentId);
+      const displayName = student ? student.name : studentId;
+      if (confirm(`「${displayName}」さんを退室させますか？`)) {
+        processAttendance(studentId);
+      }
+    }
+
+    // --- 4. ビープ音声合成 ---
+    function playBeep(type) {
+      try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (type === 1) {
+          playTone(audioCtx, 880, 0.08, 0);       // A5
+          playTone(audioCtx, 1046.5, 0.1, 0.09);  // C6
+        } else if (type === 2) {
+          playTone(audioCtx, 659.25, 0.07, 0);    // E5
+          playTone(audioCtx, 659.25, 0.07, 0.09);   // E5
+          playTone(audioCtx, 523.25, 0.12, 0.18);   // C5
+        } else {
+          playTone(audioCtx, 180, 0.35, 0);
+        }
+      } catch (e) {
+        console.warn("Audio Context blocked:", e);
+      }
+    }
+
+    function playTone(ctx, freq, duration, delay) {
+      setTimeout(() => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.12, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + duration);
+      }, delay * 1000);
+    }
+
+    // --- 5. UI更新 (PCダッシュボード向けに最適化) ---
+    function updateDashboard() {
+      const filterValue = document.getElementById('class-filter').value;
+
+      // カウンター更新
+      document.getElementById('stat-active-count').textContent = activeStudents.size;
+      document.getElementById('stat-total-scans').textContent = logs.length;
+
+      // 入室中テーブル
+      const tbody = document.getElementById('active-students-tbody');
+      const activeEmpty = document.getElementById('active-empty-state');
+      const activeTable = document.getElementById('active-students-table');
+      
+      tbody.innerHTML = "";
+
+      const activeEntries = Array.from(activeStudents.entries()).sort((a, b) => b[1].timestamp - a[1].timestamp);
+
+      let filteredEntries = activeEntries.filter(([id, data]) => {
+        const student = findStudent(id);
+        if (!student) return false;
+        if (filterValue === 'ALL') return true;
+        if (filterValue === '1') return student.id.includes("RJS26");
+        if (filterValue === '2') return student.id.includes("RJS25");
+        if (filterValue === '3') return student.id.includes("RJS24");
+        return student.classNo.includes(filterValue);
+      });
+
+      if (filteredEntries.length === 0) {
+        activeEmpty.classList.remove('hidden');
+        activeTable.classList.add('hidden');
+      } else {
+        activeEmpty.classList.add('hidden');
+        activeTable.classList.remove('hidden');
+
+        filteredEntries.forEach(([id, data]) => {
+          const student = findStudent(id);
+          const row = document.createElement('tr');
+          row.className = "hover:bg-stone-50 transition border-b border-stone-100";
+          row.innerHTML = `
+            <td class="px-4 py-3">
+              <span class="text-[10px] bg-stone-100 text-stone-500 px-1.5 py-0.5 rounded-md font-mono mr-2">${student ? student.classNo : '--'}</span>
+              <span class="font-extrabold text-stone-800">${student ? student.name : '未登録'}</span>
+            </td>
+            <td class="px-4 py-3 font-mono text-stone-500 font-semibold">${id}</td>
+            <td class="px-4 py-3 text-stone-500 font-mono">${data.time}</td>
+            <td class="px-4 py-3 text-right">
+              <button onclick="forceCheckout('${id}')" class="bg-stone-100 hover:bg-stone-200 text-stone-700 px-3 py-1 rounded-lg border border-stone-300 text-xs font-bold transition">
+                退室
+              </button>
+            </td>
+          `;
+          tbody.appendChild(row);
+        });
+      }
+
+      // 打刻履歴ログ一覧
+      const logList = document.getElementById('log-list');
+      const logEmpty = document.getElementById('log-empty-state');
+
+      logList.innerHTML = "";
+
+      if (logs.length === 0) {
+        logEmpty.classList.remove('hidden');
+        logList.classList.add('hidden');
+      } else {
+        logEmpty.classList.add('hidden');
+        logList.classList.remove('hidden');
+
+        logs.forEach(item => {
+          const isCheckIn = item.action === "IN";
+          const itemEl = document.createElement('div');
+          itemEl.className = "flex items-center justify-between p-3 hover:bg-stone-50 transition text-xs font-mono border-b border-stone-100";
+          itemEl.innerHTML = `
+            <div class="flex items-center space-x-2 overflow-hidden mr-2">
+              <span class="w-1.5 h-1.5 rounded-full ${isCheckIn ? 'bg-stone-800' : 'bg-stone-300 border border-stone-400'} flex-shrink-0"></span>
+              <div class="truncate">
+                <span class="text-stone-400 text-[10px] mr-1 font-bold">[${item.classNo}]</span>
+                <span class="font-extrabold text-stone-700">${item.name}</span>
+                <span class="text-stone-400 text-[10px] font-semibold ml-2">(${item.id})</span>
+              </div>
+            </div>
+            <div class="flex items-center space-x-3 flex-shrink-0">
+              <span class="text-stone-500 text-[10px]">${item.time}</span>
+              <span class="px-2 py-0.5 rounded text-[10px] font-bold ${
+                isCheckIn ? 'bg-stone-900 text-white' : 'bg-stone-100 text-stone-600 border border-stone-300'
+              }">
+                ${isCheckIn ? '入室' : '退室'}
+              </span>
+            </div>
+          `;
+          logList.appendChild(itemEl);
+        });
+      }
+    }
+
+    // --- 6. ポップアップ & システムアラート ---
+    let alertTimeout;
+    function showAttendancePopup(student, actionType, style, timeStr) {
+      const alertBox = document.getElementById('alert-box');
+      const iconBg = document.getElementById('alert-icon-bg');
+      const icon = document.getElementById('alert-icon');
+      const badge = document.getElementById('alert-badge');
+      const clsSpan = document.getElementById('alert-class');
+      const title = document.getElementById('alert-title');
+      const desc = document.getElementById('alert-desc');
+
+      clearTimeout(alertTimeout);
+
+      clsSpan.textContent = `CLASS: ${student.classNo}`;
+
+      if (style === "success-in") {
+        alertBox.className = "transform scale-100 opacity-100 transition-all duration-300 bg-stone-50 p-4 rounded-2xl shadow-md border-l-8 border-stone-900 flex items-center space-x-4";
+        iconBg.className = "w-12 h-12 bg-neutral-900 text-white rounded-full flex items-center justify-center text-xl flex-shrink-0 shadow-sm";
+        icon.className = "fa-solid fa-right-to-bracket";
+        badge.className = "text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-neutral-900 text-white";
+        badge.textContent = "IN - 入室";
+        title.textContent = `${student.name} さん`;
+        title.className = "font-extrabold text-stone-800 text-base truncate mt-0.5";
+        desc.textContent = `${timeStr} 入室が完了しました。 (学年: ${student.grade})`;
+      } else {
+        alertBox.className = "transform scale-100 opacity-100 transition-all duration-300 bg-stone-50 p-4 rounded-2xl shadow-md border-l-8 border-stone-400 flex items-center space-x-4";
+        iconBg.className = "w-12 h-12 bg-stone-300 text-stone-800 border border-stone-400 rounded-full flex items-center justify-center text-xl flex-shrink-0 shadow-sm";
+        icon.className = "fa-solid fa-right-from-bracket";
+        badge.className = "text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-stone-300 text-stone-800";
+        badge.textContent = "OUT - 退室";
+        title.textContent = `${student.name} さん`;
+        title.className = "font-extrabold text-stone-700 text-base truncate mt-0.5";
+        desc.textContent = `${timeStr} 退室完了 お疲れ様でした！`;
+      }
+
+      alertTimeout = setTimeout(() => {
+        alertBox.className = "transform scale-95 opacity-0 pointer-events-none transition-all duration-300 bg-white p-4 rounded-2xl shadow-md border-l-8 border-stone-800 flex items-center space-x-4";
+      }, 6000);
+    }
+
+    function showCustomAlert(titleText, bodyText, type) {
+      const alertBox = document.getElementById('alert-box');
+      const iconBg = document.getElementById('alert-icon-bg');
+      const icon = document.getElementById('alert-icon');
+      const badge = document.getElementById('alert-badge');
+      const clsSpan = document.getElementById('alert-class');
+      const title = document.getElementById('alert-title');
+      const desc = document.getElementById('alert-desc');
+
+      clearTimeout(alertTimeout);
+
+      clsSpan.textContent = `SYSTEM`;
+
+      if (type === "warning" || type === "error") {
+        alertBox.className = "transform scale-100 opacity-100 transition-all duration-300 bg-stone-50 p-4 rounded-2xl shadow-md border-l-8 border-stone-800 flex items-center space-x-4";
+        iconBg.className = "w-12 h-12 bg-stone-900 text-white rounded-full flex items-center justify-center text-xl flex-shrink-0 shadow-sm";
+        icon.className = "fa-solid fa-triangle-exclamation";
+        badge.className = "text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-stone-900 text-white";
+        badge.textContent = type.toUpperCase();
+        title.textContent = titleText;
+        title.className = "font-extrabold text-stone-800 text-base truncate mt-0.5";
+        desc.textContent = bodyText;
+      }
+
+      alertTimeout = setTimeout(() => {
+        alertBox.className = "transform scale-95 opacity-0 pointer-events-none transition-all duration-300 bg-white p-4 rounded-2xl shadow-md border-l-8 border-stone-800 flex items-center space-x-4";
+      }, 6000);
+    }
+
+    // --- 7. ローカルストレージ連動 ---
+    function saveToStorage() {
+      const activeObj = Object.fromEntries(activeStudents);
+      localStorage.setItem('active_students_pc_qr', JSON.stringify(activeObj));
+      localStorage.setItem('attendance_logs_pc_qr', JSON.stringify(logs));
+    }
+
+    function loadFromStorage() {
+      try {
+        const savedActive = localStorage.getItem('active_students_pc_qr');
+        if (savedActive) {
+          activeStudents = new Map(Object.entries(JSON.parse(savedActive)));
+        }
+        const savedLogs = localStorage.getItem('attendance_logs_pc_qr');
+        if (savedLogs) {
+          logs = JSON.parse(savedLogs);
+        }
+      } catch (e) {
+        console.error("ストレージ復元エラー:", e);
+        activeStudents = new Map();
+        logs = [];
+      }
+    }
+
+    function clearLogs() {
+      if (confirm("全ての打刻履歴ログをリセットしますか？ (入室中の状態は維持されます)")) {
+        logs = [];
+        saveToStorage();
+        updateDashboard();
+      }
+    }
+  </script>
+</body>
+</html>
+
+```
